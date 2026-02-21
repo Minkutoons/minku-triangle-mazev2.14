@@ -26,8 +26,10 @@ const cv = document.getElementById("cv");
 const ctx = cv.getContext("2d");
 
 function resize(){
+  const top = document.getElementById('top');
+  const topH = top ? top.getBoundingClientRect().height : 0;
   cv.width = window.innerWidth;
-  cv.height = window.innerHeight*0.9;
+  cv.height = Math.max(240, Math.floor(window.innerHeight - topH));
 }
 resize();
 window.onresize = resize;
@@ -39,7 +41,7 @@ let ball = {x:0,y:0,vx:0,vy:0,r:12};
 
 function resetBall(){
   ball.x = cv.width/2;
-  ball.y = cv.height/2 - 200;
+  ball.y = cv.height/2 - Math.min(120, cv.height*0.18);
   ball.vx = ball.vy = 0;
 }
 resetBall();
@@ -87,12 +89,32 @@ function drawShape(R){
   }
 
   if(shape==="triangle"){
-    ctx.moveTo(cx,cy-R);
-    ctx.lineTo(cx+R*Math.cos(Math.PI/6),
-               cy+R*Math.sin(Math.PI/6));
-    ctx.lineTo(cx-R*Math.cos(Math.PI/6),
-               cy+R*Math.sin(Math.PI/6));
-    ctx.closePath();
+    // draw outer triangle with a small gate opening on one edge (matches physics gate above)
+    const ax=cx, ay=cy-R;
+    const bx=cx+R*Math.cos(Math.PI/6), by=cy+R*Math.sin(Math.PI/6);
+    const cx2=cx-R*Math.cos(Math.PI/6), cy2=cy+R*Math.sin(Math.PI/6);
+    const pts=[[ax,ay],[bx,by],[cx2,cy2]];
+
+    function lerp(a,b,t){ return a + (b-a)*t; }
+
+    for(let i=0;i<3;i++){
+      const p0=pts[i], p1=pts[(i+1)%3];
+      ctx.beginPath();
+      if(i===GATE.edgeIndex){
+        const t0 = clamp(GATE.tCenter - GATE.tHalf, 0, 1);
+        const t1 = clamp(GATE.tCenter + GATE.tHalf, 0, 1);
+        // segment before gate
+        ctx.moveTo(p0[0], p0[1]);
+        ctx.lineTo(lerp(p0[0],p1[0],t0), lerp(p0[1],p1[1],t0));
+        // segment after gate
+        ctx.moveTo(lerp(p0[0],p1[0],t1), lerp(p0[1],p1[1],t1));
+        ctx.lineTo(p1[0], p1[1]);
+      }else{
+        ctx.moveTo(p0[0], p0[1]);
+        ctx.lineTo(p1[0], p1[1]);
+      }
+      ctx.stroke();
+    }
   }
 
   ctx.stroke();
@@ -169,6 +191,13 @@ function pointInTri(px,py, ax,ay, bx,by, cx,cy){
   return (u >= 0) && (v >= 0) && (u + v <= 1);
 }
 
+// Simple Triangle Gate (outer boundary only, Step: allow passing through one edge section)
+const GATE = {
+  edgeIndex: 0,        // 0: AB (top->right), 1: BC (right->left base), 2: CA (left->top)
+  tCenter: 0.55,       // position along edge (0..1)
+  tHalf: 0.12          // half-width along edge (0..0.5)
+};
+
 function clampBallToTriangle(ball, ax,ay, bx,by, cx,cy){
   const edges = [
     [ax,ay,bx,by],
@@ -190,7 +219,21 @@ function clampBallToTriangle(ball, ax,ay, bx,by, cx,cy){
   }
 
   // ensure distance from each edge >= r (push away from edge)
-  for(const e of edges){
+  for(let ei=0; ei<edges.length; ei++){
+    const e = edges[ei];
+
+    // Gate: skip collision push for points near the gate segment on selected edge
+    if(ei === GATE.edgeIndex){
+      const ax3=e[0], ay3=e[1], bx3=e[2], by3=e[3];
+      const abx=bx3-ax3, aby=by3-ay3;
+      const apx=ball.x-ax3, apy=ball.y-ay3;
+      const denom = (abx*abx + aby*aby + 1e-9);
+      const t = clamp((apx*abx + apy*aby)/denom, 0, 1);
+      if(Math.abs(t - GATE.tCenter) <= GATE.tHalf){
+        continue; // opening: no wall push here
+      }
+    }
+
     const p = closestPointOnSegment(ball.x, ball.y, e[0],e[1], e[2],e[3]);
     const dx = ball.x - p.x, dy = ball.y - p.y;
     const d = Math.hypot(dx,dy) + 1e-9;
@@ -210,7 +253,7 @@ function loop(){
 
   let cx=cv.width/2;
   let cy=cv.height/2;
-  let R=250;
+  let R=Math.min(cv.width, cv.height)*0.42;
 
   drawShape(R);
   drawRings(R);
