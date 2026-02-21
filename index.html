@@ -308,7 +308,7 @@ function drawPocketOverlay(){
   const ox=cx-(grid/2)*scale, oy=cy-(grid/2)*scale;
 
   ctx.save();
-  ctx.globalAlpha=0.18;
+  ctx.globalAlpha=0.35;
   if(chosen==="circle"){
     ctx.fillStyle="#00ffd0";
     ctx.beginPath();
@@ -329,10 +329,10 @@ function drawPocketOverlay(){
 
   ctx.save();
   ctx.globalAlpha=0.75;
-  ctx.strokeStyle="#00ffd0"; ctx.lineWidth=2;
+  ctx.strokeStyle="#00ffd0"; ctx.lineWidth=3;
   ctx.beginPath(); ctx.arc(cx,cy,rCircleMax*scale,0,Math.PI*2); ctx.stroke();
 
-  ctx.strokeStyle="#ff4dd8"; ctx.lineWidth=1;
+  ctx.strokeStyle="#ff4dd8"; ctx.lineWidth=2;
   for(let y=1;y<grid-1;y++){
     for(let x=1;x<grid-1;x++){
       const i=y*grid+x;
@@ -346,6 +346,53 @@ function drawPocketOverlay(){
   ctx.restore();
 }
 // ---------------------------------------------------------------
+
+// ---- Triangle boundary clamp (keeps ball inside triangle for compare builds) ----
+function clamp2(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function closestPointOnSegment2(px,py, ax,ay, bx,by){
+  const abx=bx-ax, aby=by-ay;
+  const apx=px-ax, apy=py-ay;
+  const t = clamp2((apx*abx + apy*aby) / (abx*abx + aby*aby + 1e-9), 0, 1);
+  return { x: ax + abx*t, y: ay + aby*t };
+}
+function pointInTri2(px,py, ax,ay, bx,by, cx,cy){
+  const v0x=cx-ax, v0y=cy-ay;
+  const v1x=bx-ax, v1y=by-ay;
+  const v2x=px-ax, v2y=py-ay;
+  const dot00=v0x*v0x+v0y*v0y;
+  const dot01=v0x*v1x+v0y*v1y;
+  const dot02=v0x*v2x+v0y*v2y;
+  const dot11=v1x*v1x+v1y*v1y;
+  const dot12=v1x*v2x+v1y*v2y;
+  const invDen = 1/(dot00*dot11 - dot01*dot01 + 1e-9);
+  const u = (dot11*dot02 - dot01*dot12)*invDen;
+  const v = (dot00*dot12 - dot01*dot02)*invDen;
+  return (u>=0)&&(v>=0)&&(u+v<=1);
+}
+function clampBallToTriangle(ball, ax,ay, bx,by, cx,cy){
+  const edges=[[ax,ay,bx,by],[bx,by,cx,cy],[cx,cy,ax,ay]];
+  if(!pointInTri2(ball.x, ball.y, ax,ay, bx,by, cx,cy)){
+    let best=null, bestD2=1e30;
+    for(const e of edges){
+      const p=closestPointOnSegment2(ball.x, ball.y, e[0],e[1], e[2],e[3]);
+      const dx=ball.x-p.x, dy=ball.y-p.y;
+      const d2=dx*dx+dy*dy;
+      if(d2<bestD2){ bestD2=d2; best=p; }
+    }
+    ball.x=best.x; ball.y=best.y;
+  }
+  for(const e of edges){
+    const p=closestPointOnSegment2(ball.x, ball.y, e[0],e[1], e[2],e[3]);
+    const dx=ball.x-p.x, dy=ball.y-p.y;
+    const d=Math.hypot(dx,dy)+1e-9;
+    if(d<ball.r){
+      const push=(ball.r-d);
+      ball.x += (dx/d)*push;
+      ball.y += (dy/d)*push;
+      ball.vx *= 0.92; ball.vy *= 0.92;
+    }
+  }
+}
 
 function loop(){
   ctx.clearRect(0,0,cv.width,cv.height);
