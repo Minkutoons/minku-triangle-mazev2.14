@@ -76,6 +76,10 @@
 </style>
 </head>
 <body>
+<div id="errPanel" style="position:fixed;left:10px;right:10px;bottom:10px;max-height:42vh;overflow:auto;z-index:9999;
+  background:rgba(0,0,0,.72);color:#fff;font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;padding:10px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.18);display:none;white-space:pre-wrap;"></div>
+
 <div id="wrap">
   <div id="top">
     <div class="left">
@@ -112,6 +116,25 @@
 </div>
 
 <script>
+(function(){
+  const panel = () => document.getElementById('errPanel');
+  function show(msg){
+    const p = panel();
+    if(!p) return;
+    p.style.display = 'block';
+    p.textContent += msg + "\n";
+  }
+  window.addEventListener('error', (e)=>{
+    show("[error] " + (e.message || e.error || "unknown") + " @ " + (e.filename||"") + ":" + (e.lineno||"") );
+  });
+  window.addEventListener('unhandledrejection', (e)=>{
+    show("[promise] " + (e.reason && (e.reason.stack || e.reason.message) || String(e.reason)));
+  });
+  // tiny sanity ping so we know JS started
+  window.__mazePing = ()=> show("[ping] JS alive " + new Date().toISOString());
+  setTimeout(()=>{ try{ window.__mazePing(); }catch(_){} }, 500);
+})();
+
 (() => {
   // ========= Locked parameters (gathered & applied) =========
   const LOCKED = {
@@ -164,16 +187,17 @@
 
   // ---------- Resize ----------
   function resize(){
-    const dpr = Math.max(1, Math.min(2, devicePixelRatio||1));
-    cv.width = Math.floor(cv.clientWidth * dpr);
-    cv.height = Math.floor(cv.clientHeight * dpr);
+    // super-safe mobile sizing
+    const w = Math.max(320, Math.floor(window.innerWidth || document.documentElement.clientWidth || 360));
+    const h = Math.max(480, Math.floor(window.innerHeight || document.documentElement.clientHeight || 640));
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    cv.style.width = w + "px";
+    cv.style.height = (h - 170) + "px"; // keep UI visible
+    cv.width = Math.floor(w * dpr);
+    cv.height = Math.floor((h - 170) * dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
   }
-  if (window.ResizeObserver) {
-    new ResizeObserver(resize).observe(cv);
-  } else {
-    window.addEventListener('resize', resize, {passive:true});
-  }
+  window.addEventListener('resize', resize, {passive:true});
   resize();
 
   // ---------- Input tilt ----------
@@ -227,37 +251,34 @@
 
   // ---------- SDF shapes ----------
   function sdfTriangle(x,y,R){
-    // equilateral triangle (approx) centered at origin
+    // Robust equilateral triangle SDF (Inigo Quilez style), centered at origin, "radius" R
+    // p is point, r is size
+    let px = x, py = y;
     const k = Math.sqrt(3);
-    x = Math.abs(x);
-    return Math.max((x*0.5 + k*y*0.5), -y) - R*0.62;
+    px = Math.abs(px) - R;
+    py = py + R/k;
+    if (px + k*py > 0){
+      const tx = (px - k*py) * 0.5;
+      const ty = (-k*px - py) * 0.5;
+      px = tx; py = ty;
+    }
+    px -= Math.max(-2*R, Math.min(0, px)); // clamp(px, -2R, 0)
+    const d = Math.hypot(px, py) * Math.sign(py);
+    return d;
   }
   function sdfSquare(x,y,R){
     const ax=Math.abs(x), ay=Math.abs(y);
-    return Math.max(ax,ay) - R*0.70;
+    return Math.max(ax,ay) - R;
   }
   function sdfRect(x,y,R){
-    const hx=R*0.78, hy=R*0.56;
+    // Rect sized relative to R (wider than tall)
+    const hx=R*1.05, hy=R*0.72;
     const ax=Math.abs(x)-hx, ay=Math.abs(y)-hy;
     const ox=Math.max(ax,0), oy=Math.max(ay,0);
     return Math.hypot(ox,oy) + Math.min(Math.max(ax,ay),0);
   }
   function sdfCircle(x,y,R){
-    return Math.hypot(x,y) - R*0.78;
-  }
-  function sdfShape(shape,x,y,R){
-    if(shape==="triangle") return sdfTriangle(x,y,R);
-    if(shape==="square") return sdfSquare(x,y,R);
-    if(shape==="rect") return sdfRect(x,y,R);
-    return sdfCircle(x,y,R);
-  }
-  function gradSdf(shape,x,y,R){
-    const eps = 0.5;
-    const d0 = sdfShape(shape,x,y,R);
-    const dx = sdfShape(shape,x+eps,y,R)-d0;
-    const dy = sdfShape(shape,x,y+eps,R)-d0;
-    const len = Math.hypot(dx,dy) || 1;
-    return {gx:dx/len, gy:dy/len};
+    return Math.hypot(x,y) - R;
   }
 
   // ---------- Maze build (cutouts gathered & applied) ----------
@@ -370,17 +391,28 @@
   function resetBalls(){
     const D = +ballDEl.value;
     const r = D/2;
-    // spawn in a neat 2x2 pack, safely inside outer region
-    const baseX = -90, baseY = -70;
-    const gap = r*2.3;
+
+    // Ensure we have a currentR even before first animation tick
+    const W = cv.clientWidth || cv.width, H = cv.clientHeight || cv.height;
+    const R = Math.min(W,H) * 0.46;
+    currentR = R;
+
+    // Spawn 4 balls near the OUTER region, spaced around the ring
+    const startOffset = ringSpacing * 0.45; // slightly inside boundary
+    const rr = Math.max(30, currentR - startOffset);
+
     for(let i=0;i<balls.length;i++){
       const b = balls[i];
       b.baseR = r; b.r = r;
       b.vx = b.vy = 0;
-      const ox = (i%2)*gap;
-      const oy = (i>=2)*gap;
-      b.x = baseX + ox;
-      b.y = baseY + oy;
+
+      const a = (-Math.PI/2) + i*(Math.PI*2/balls.length) + 0.18; // top-ish, spread around
+      const p = pointOnIso(shape, a, rr);
+
+      // push a tiny bit inward and stagger to reduce overlap
+      const inward = 1 + i*0.15;
+      b.x = p.x * (1 - (r*inward)/Math.max(1, rr));
+      b.y = p.y * (1 - (r*inward)/Math.max(1, rr));
     }
   }
 
@@ -635,20 +667,23 @@
   }
 
   function pointOnIso(shape, ang, rr){
-    // find point where sdf = rr - Riso ??? we need mapping: for rings, we use contour target -i*spacing.
-    // Here rr is approximate geometric radius for drawing; use boundary-based scaling for visuals.
-    // We'll simply use circle if circle shape, else use boundary point scaled inward.
-    if(shape==="circle"){
-      return {x:Math.cos(ang)*rr*0.78, y:Math.sin(ang)*rr*0.78};
+    // Accurate iso-contour point:
+    // boundary is sdf=0 at size currentR. Rings are inward offsets from boundary.
+    const t = Math.max(0, currentR - rr); // inward offset from boundary
+    // binary search radius along angle where sdf(shape,x,y,currentR) == -t
+    let lo = 0, hi = currentR*1.15;
+    for(let k=0;k<20;k++){
+      const mid = (lo+hi)/2;
+      const x = Math.cos(ang)*mid, y = Math.sin(ang)*mid;
+      const d = sdfShape(shape, x, y, currentR) + t; // want ~0
+      if(d > 0) hi = mid; else lo = mid;
     }
-    // for other shapes: take boundary point at angle, scale to rr/R
-    const boundary = pointOnBoundary(shape, ang, currentR);
-    const bLen = Math.hypot(boundary.x, boundary.y) || 1;
-    const scale = (rr*0.78) / bLen;
-    return {x: boundary.x*scale, y: boundary.y*scale};
+    const r = (lo+hi)/2;
+    return {x:Math.cos(ang)*r, y:Math.sin(ang)*r};
   }
 
   // We'll keep currentR global for drawing mapping.
+ for drawing mapping.
   let currentR = 260;
 
   // ---------- Loop ----------
@@ -716,6 +751,23 @@
   start();
 
 })();
+
+// ---- Safe init for mobile ----
+try{
+  window.addEventListener('load', ()=>{
+    try{
+      resize();
+      // ensure a known start state
+      level = 1;
+      buildLevel();
+      resetBalls();
+    }catch(e){ 
+      const p=document.getElementById('errPanel'); if(p){p.style.display='block'; p.textContent += "[init] " + (e.stack||e.message||e) + "\n";}
+    }
+  }, {once:true});
+}catch(e){
+  const p=document.getElementById('errPanel'); if(p){p.style.display='block'; p.textContent += "[boot] " + (e.stack||e.message||e) + "\n";}
+}
 </script>
 </body>
 </html>
