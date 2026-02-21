@@ -1,399 +1,168 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Rock n Roll: Ball Maze Challenge – Minku (Test)</title>
-<style>
-  :root { --bg:#141414; --panel:#1f1f1f; --text:#f3f3f3; --muted:#b9b9b9; }
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-  #wrap{position:fixed;inset:0;display:flex;flex-direction:column}
-  #top{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;background:#101010;border-bottom:1px solid #2a2a2a}
-  .left,.right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .pill{background:var(--panel);border:1px solid #2b2b2b;border-radius:999px;padding:6px 10px;font-size:12px;color:var(--muted)}
-  .btn{background:var(--panel);border:1px solid #2b2b2b;border-radius:10px;padding:8px 10px;color:var(--text);font-weight:600}
-  .btn:active{transform:translateY(1px)}
-  canvas{flex:1;display:block;touch-action:none;width:100%;height:100%}
-</style>
-</head>
-<body>
-<div id="wrap">
-  <div id="top">
-    <div class="left">
-      <div class="pill"><b style="color:#fff">Rock n Roll</b> • Minku</div>
-      <div class="pill" id="status">L1</div>
-      <button class="btn" id="restart">Restart</button>
-      <button class="btn" id="prev">Prev</button>
-      <button class="btn" id="next">Next</button>
-      <button class="btn" id="comfort">Comfort: ON</button>
-    </div>
-    <div class="right">
-      <div class="pill">Tilt: <span id="tiltTxt">0,0</span></div>
-    </div>
-  </div>
-  <canvas id="cv"></canvas>
-</div>
+// ====== MAZE GATE GENERATOR (minimal, no physics) ======
 
-<script>
-(() => {
-  const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d');
-  const statusEl = document.getElementById('status');
-  const tiltTxt = document.getElementById('tiltTxt');
+const TAU = Math.PI * 2;
 
-  function resize(){
-    const dpr = Math.max(1, Math.min(2, devicePixelRatio||1));
-    const w = cv.parentElement.clientWidth;
-    const h = cv.parentElement.clientHeight;
-    cv.width  = Math.floor(w * dpr);
-    cv.height = Math.floor(h * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-  }
-  window.addEventListener('load', resize);
-  window.addEventListener('resize', resize);
-  resize();
+function normDeg(d) {
+  d %= 360;
+  return d < 0 ? d + 360 : d;
+}
 
-  // ---- Level plan (Circle unlock @ 5) ----
-  function shapeForLevel(L){
-    if (L===1) return "triangle";
-    if (L===2) return "square";
-    if (L===3) return "rect";
-    if (L===4) return "square";
-    if (L>=5) return "circle";
-    return "square";
-  }
-  function ringCountForLevel(L){
-    if (L<=2) return 6;
-    if (L<=5) return 7;
-    if (L<=10) return 8;
-    if (L<=15) return 9;
-    return 10;
-  }
-  function cutoutWidthForLevel(L){
-    if (L<=2) return 70;
-    if (L<=5) return 60;
-    if (L<=10) return 52;
-    if (L<=15) return 46;
-    return 42;
-  }
-  function wallThicknessForLevel(L){
-    return (L<=5) ? 10 : (L<=12 ? 11 : 12);
-  }
+function degToRad(d) {
+  return (d * Math.PI) / 180;
+}
 
-  let level = 1;
-  let shape = shapeForLevel(level);
-  let rings = ringCountForLevel(level);
-  let cutW = cutoutWidthForLevel(level) * Math.PI/180;
-  let wallT = wallThicknessForLevel(level);
+function sectorIndex(deg, sectorCount) {
+  const size = 360 / sectorCount;
+  return Math.floor(normDeg(deg) / size); // 0..sectorCount-1
+}
 
-  // cutouts per ring
-  let cutouts = [];
-  function regenMaze(){
-    shape = shapeForLevel(level);
-    rings = ringCountForLevel(level);
-    cutW  = cutoutWidthForLevel(level) * Math.PI/180;
-    wallT = wallThicknessForLevel(level);
+// Pick a degree inside a sector, using "slot" to alternate position (early/late)
+function pickInSector(sector, sectorCount, slot /*0 early,1 late*/, jitterDeg = 3) {
+  const size = 360 / sectorCount;
+  const start = sector * size;
+  const base = start + (slot === 0 ? size * 0.25 : size * 0.75);
+  const jitter = (Math.random() * 2 - 1) * jitterDeg;
+  return normDeg(base + jitter);
+}
 
-    cutouts = [];
-    const base = Math.random()*Math.PI*2;
-    for(let i=1;i<=rings;i++){
-      cutouts.push({ a: base + i*0.9, w: Math.max(cutW*(1 - i*0.015), 0.45) });
+// Count gates per sector (A+B only; you can include C if you want separately)
+function countPerSector(gatesByRing, sectorCount) {
+  const counts = Array(sectorCount).fill(0);
+  for (const ring of gatesByRing) {
+    for (const g of ring) {
+      if (g.type === "A" || g.type === "B") counts[sectorIndex(g.deg, sectorCount)]++;
     }
-    resetBall();
-    statusEl.textContent = `L${level} • ${shape.toUpperCase()} • ${level<5?"Circle 🔒":"Circle ✅"}`;
+  }
+  return counts;
+}
+
+// Simple imbalance score: max - min
+function imbalanceScore(counts) {
+  let mn = Infinity, mx = -Infinity;
+  for (const c of counts) { mn = Math.min(mn, c); mx = Math.max(mx, c); }
+  return mx - mn;
+}
+
+/**
+ * Generate gates for one level.
+ * Output: gatesByRing = [ [A,B], [A,B], ..., [C] ]
+ */
+function generateGates({
+  shapeType = "circle",     // "circle" | "polygon" | "triangle"
+  ringCount = 4,            // N
+  levelIndex = 1,           // 1-based
+  baseShiftDeg = 22,        // spiral step
+  shiftJitterDeg = 6,       // organic
+  separationMinDeg = 140,
+  separationMaxDeg = 170,
+  ballD = 20,               // px
+  cutoutWidthFactor = 1.3,  // relative to probe diameter
+} = {}) {
+  const sectorCount = (shapeType === "triangle") ? 6 : 4;
+
+  // Bias: odd levels CW (+1), even levels CCW (-1)
+  const bias = (levelIndex % 2 === 1) ? +1 : -1;
+
+  const probeD = 1.5 * ballD;
+  const cutoutWidth = cutoutWidthFactor * probeD; // linear gap width in px (for your builder)
+
+  // Try a few times to get decent sector balance
+  let best = null;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const gatesByRing = [];
+
+    // Choose a quarter/sector distribution: balanced by construction via slot plan
+    // Slots for sectors: we’ll fill 2-2-1-1 pattern naturally by picking A in one sector, B in another, then shifting.
+    // Start sector picks are random but controlled.
+    const A0_sector = Math.floor(Math.random() * sectorCount);
+    const A0_slot = attempt % 2; // alternate early/late
+    let Adeg = pickInSector(A0_sector, sectorCount, A0_slot, 4);
+
+    // Asymmetric B separated from A
+    const sep = separationMinDeg + Math.random() * (separationMaxDeg - separationMinDeg);
+    let Bdeg = normDeg(Adeg + sep);
+
+    // Rings 1..N-1 have A & B
+    for (let r = 1; r <= ringCount - 1; r++) {
+      gatesByRing.push([
+        { type: "A", deg: Adeg, widthPx: cutoutWidth },
+        { type: "B", deg: Bdeg, widthPx: cutoutWidth },
+      ]);
+
+      const step = baseShiftDeg + (Math.random() * 2 - 1) * shiftJitterDeg;
+      Adeg = normDeg(Adeg + bias * step);
+      Bdeg = normDeg(Bdeg + bias * step);
+    }
+
+    // Ring N has single center gate C, placed between A(N-1) and B(N-1)
+    // Compute midpoint on circle (short way) in degrees
+    const last = gatesByRing[gatesByRing.length - 1];
+    const A_last = last[0].deg;
+    const B_last = last[1].deg;
+
+    const mid = midpointAngleDeg(A_last, B_last);
+    const Cdeg = normDeg(mid + (Math.random() * 2 - 1) * 8); // organic shift
+
+    gatesByRing.push([{ type: "C", deg: Cdeg, widthPx: cutoutWidth }]);
+
+    const counts = countPerSector(gatesByRing, sectorCount);
+    const score = imbalanceScore(counts);
+
+    if (!best || score < best.score) best = { gatesByRing, counts, score, bias, cutoutWidth, probeD };
+    if (score <= 1) break; // good enough
   }
 
-  // ---- Comfort mode default ON ----
-  let comfortMode = true;
-  const comfortBtn = document.getElementById('comfort');
-  comfortBtn.textContent = "Comfort: ON";
-  comfortBtn.onclick = () => {
-    comfortMode = !comfortMode;
-    comfortBtn.textContent = `Comfort: ${comfortMode ? 'ON' : 'OFF'}`;
+  return {
+    shapeType,
+    ringCount,
+    levelIndex,
+    biasDirection: best.bias, // +1 CW, -1 CCW
+    probeDiameter: best.probeD,
+    cutoutWidthPx: best.cutoutWidth,
+    sectorCount: (shapeType === "triangle") ? 6 : 4,
+    sectorCounts: best.counts,
+    gatesByRing: best.gatesByRing,
   };
+}
 
-  // ---- Tilt input ----
-  let tiltX = 0, tiltY = 0;
-  window.addEventListener('deviceorientation', (e) => {
-    const gx = (e.gamma ?? 0); // left-right
-    const by = (e.beta ?? 0);  // front-back
-    if (comfortMode){
-      // portrait-friendly mapping
-      tiltX = Math.max(-20, Math.min(20, by)) / 20;
-      tiltY = Math.max(-20, Math.min(20, -gx)) / 20;
-    } else {
-      // landscape-friendly mapping
-      tiltX = Math.max(-20, Math.min(20, gx)) / 20;
-      tiltY = Math.max(-20, Math.min(20, by)) / 20;
-    }
-  }, {passive:true});
+// Midpoint on circle in degrees (handles wrap-around)
+function midpointAngleDeg(a, b) {
+  a = normDeg(a); b = normDeg(b);
+  let d = b - a;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return normDeg(a + d / 2);
+}
 
-  // keyboard fallback
-  const keys = new Set();
-  window.addEventListener('keydown', (e)=> keys.add(e.key.toLowerCase()));
-  window.addEventListener('keyup',   (e)=> keys.delete(e.key.toLowerCase()));
-  function keyVec(){
-    let x=0,y=0;
-    if (keys.has('arrowleft')||keys.has('a')) x-=1;
-    if (keys.has('arrowright')||keys.has('d')) x+=1;
-    if (keys.has('arrowup')||keys.has('w')) y-=1;
-    if (keys.has('arrowdown')||keys.has('s')) y+=1;
-    const m=Math.hypot(x,y)||1;
-    return {x:x/m,y:y/m};
-  }
+// ====== PROBE CHECK HOOK (YOU CONNECT TO YOUR PHYSICS) ======
+// You already have ball physics. This just defines required runs.
+function getProbeRuns(plan) {
+  // Intended inward direction follows bias (CW for +1, CCW for -1)
+  return [
+    { name: "A_to_C", startGate: "A", goalGate: "C", inward: true,  direction: plan.biasDirection },
+    { name: "B_to_C", startGate: "B", goalGate: "C", inward: true,  direction: plan.biasDirection },
+    { name: "C_to_OUT", startGate: "C", goalGate: "OUT", inward: false, direction: -plan.biasDirection },
+  ];
+}
 
-  // ---- SDF geometry ----
-  function sdfCircle(x,y,R){ return Math.hypot(x,y) - R; }
-  function sdfBox(x,y,hx,hy){
-    const ax = Math.abs(x) - hx;
-    const ay = Math.abs(y) - hy;
-    const ox = Math.max(ax,0), oy = Math.max(ay,0);
-    return Math.hypot(ox,oy) + Math.min(Math.max(ax,ay),0);
-  }
-  function sdfEquiTri(x,y,R){
-    const k = Math.sqrt(3);
-    x = Math.abs(x) - R;
-    y = y + R/k;
-    if (x + k*y > 0){
-      const nx = (x - k*y)/2;
-      const ny = (-k*x - y)/2;
-      x = nx; y = ny;
-    }
-    x -= Math.max(Math.min(x,0), -2*R);
-    return -Math.hypot(x,y) * Math.sign(y);
-  }
-  function sdfShape(shape, x,y, R){
-    if (shape==="circle") return sdfCircle(x,y,R);
-    if (shape==="square") return sdfBox(x,y,R,R);
-    if (shape==="rect")   return sdfBox(x,y,R*1.15,R*0.85);
-    if (shape==="triangle") return sdfEquiTri(x,y,R*0.95);
-    return sdfCircle(x,y,R);
-  }
-  function gradSdf(shape, x,y,R){
-    const e=0.8;
-    const dx = sdfShape(shape,x+e,y,R) - sdfShape(shape,x-e,y,R);
-    const dy = sdfShape(shape,x,y+e,R) - sdfShape(shape,x,y-e,R);
-    const m=Math.hypot(dx,dy)||1;
-    return {gx:dx/m, gy:dy/m};
-  }
+/*
+Usage:
 
-  // ---- Ball ----
-  const ball = { x:0, y:0, vx:0, vy:0, r:10 };
-  function resetBall(){
-    ball.vx=ball.vy=0;
-    ball.x = -80;
-    ball.y = -60;
-  }
+const plan = generateGates({
+  shapeType: "circle",
+  ringCount: 4,
+  levelIndex: 1,
+  ballD: 18,
+});
 
-  // ---- Collision: boundary clamp + ring walls ----
-  function applyCollisions(R){
-    // 1) hard boundary clamp (no outside)
-    let d = sdfShape(shape, ball.x, ball.y, R);
-    if (d > -ball.r){
-      const {gx,gy} = gradSdf(shape, ball.x, ball.y, R);
-      const push = (d + ball.r) + 0.6;
-      ball.x -= gx*push;
-      ball.y -= gy*push;
-      ball.vx *= 0.4; ball.vy *= 0.4;
-    }
+console.log(plan.gatesByRing, plan.sectorCounts);
 
-    // 2) ring walls along sdf contours with cutouts
-    const ringSpacing = (R - 40) / (rings + 1);
-    for(let i=1;i<=rings;i++){
-      const target = -i * ringSpacing;
-      d = sdfShape(shape, ball.x, ball.y, R);
-      const band = Math.abs(d - target);
-      if (band < (wallT/2 + ball.r*0.55)){
-        const ang = Math.atan2(ball.y, ball.x);
-        const co = cutouts[i-1];
-        const da = Math.atan2(Math.sin(ang-co.a), Math.cos(ang-co.a));
-        const inCut = Math.abs(da) < (co.w/2);
-        if (!inCut){
-          const {gx,gy} = gradSdf(shape, ball.x, ball.y, R);
-          const sign = (d > target) ? 1 : -1;
-          const push = (wallT/2 + ball.r*0.6) - band + 0.8;
-          ball.x += gx * push * sign;
-          ball.y += gy * push * sign;
-          ball.vx *= 0.55; ball.vy *= 0.55;
-        }
-      }
-    }
-  }
+Then build geometry with plan.gatesByRing:
+- For circle: create cutout at angle deg with widthPx (convert widthPx to angle using ring radius)
+- For polygon/triangle: cut a segment length widthPx on the wall, edges normal to wall face.
 
-  function checkWin(){
-    return Math.hypot(ball.x, ball.y) < 18;
-  }
-
-  // ---- Draw boundary path (triangle is upright now) ----
-  function pathBoundary(shape, R){
-    ctx.beginPath();
-    if (shape==="circle"){
-      ctx.arc(0,0,R,0,Math.PI*2); return;
-    }
-    if (shape==="square"){
-      ctx.rect(-R,-R,R*2,R*2); return;
-    }
-    if (shape==="rect"){
-      const hx=R*1.15, hy=R*0.85;
-      ctx.rect(-hx,-hy,hx*2,hy*2); return;
-    }
-    if (shape==="triangle"){
-      const r=R*0.95;
-      ctx.moveTo(0, -r);
-      ctx.lineTo( r*Math.cos(Math.PI/6),  r*Math.sin(Math.PI/6));
-      ctx.lineTo(-r*Math.cos(Math.PI/6),  r*Math.sin(Math.PI/6));
-      ctx.closePath();
-      return;
-    }
-    ctx.arc(0,0,R,0,Math.PI*2);
-  }
-
-  // ---- Draw rings by marching along angles (visual only) ----
-  function draw(R){
-    ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
-    ctx.save();
-    ctx.translate(cv.clientWidth/2, cv.clientHeight/2);
-
-    // base
-    ctx.fillStyle="#0f0f0f";
-    ctx.fillRect(-cv.clientWidth/2,-cv.clientHeight/2,cv.clientWidth,cv.clientHeight);
-
-    // outer base plate
-    ctx.fillStyle="#1b1b1b";
-    pathBoundary(shape, R+18);
-    ctx.fill();
-
-    // boundary stroke
-    ctx.strokeStyle="#3a3a3a";
-    ctx.lineWidth=2;
-    pathBoundary(shape, R);
-    ctx.stroke();
-
-    const ringSpacing = (R - 40) / (rings + 1);
-
-    // rings
-    for(let i=1;i<=rings;i++){
-      const target = -i * ringSpacing;
-
-      // contour path
-      const steps=220;
-      ctx.beginPath();
-      for(let s=0;s<=steps;s++){
-        const ang = (s/steps)*Math.PI*2;
-        let lo=0, hi=R*1.4;
-        for(let it=0;it<18;it++){
-          const mid=(lo+hi)/2;
-          const x=Math.cos(ang)*mid, y=Math.sin(ang)*mid;
-          const d=sdfShape(shape,x,y,R);
-          if (d > target) hi=mid; else lo=mid;
-        }
-        const rr=(lo+hi)/2;
-        const x=Math.cos(ang)*rr, y=Math.sin(ang)*rr;
-        if (s===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
-      ctx.closePath();
-
-      ctx.strokeStyle="#2f2f2f";
-      ctx.lineWidth=wallT;
-      ctx.lineCap="round";
-      ctx.stroke();
-
-      // erase cutout
-      const co=cutouts[i-1];
-      const a0=co.a-co.w/2, a1=co.a+co.w/2;
-      ctx.save();
-      ctx.globalCompositeOperation="destination-out";
-      ctx.beginPath();
-      const steps2=60;
-      for(let s=0;s<=steps2;s++){
-        const ang=a0+(s/steps2)*(a1-a0);
-        let lo=0, hi=R*1.4;
-        for(let it=0;it<16;it++){
-          const mid=(lo+hi)/2;
-          const x=Math.cos(ang)*mid, y=Math.sin(ang)*mid;
-          const d=sdfShape(shape,x,y,R);
-          if (d > target) hi=mid; else lo=mid;
-        }
-        const rr=(lo+hi)/2;
-        const x=Math.cos(ang)*rr, y=Math.sin(ang)*rr;
-        if (s===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
-      ctx.strokeStyle="#000";
-      ctx.lineWidth=wallT+6;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // center target
-    ctx.fillStyle="#151515";
-    ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle="#5a5a5a"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.stroke();
-
-    // ball
-    const grad = ctx.createRadialGradient(ball.x-4,ball.y-6,2,ball.x,ball.y,ball.r+6);
-    grad.addColorStop(0,"#fff1b8");
-    grad.addColorStop(1,"#caa93b");
-    ctx.fillStyle=grad;
-    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle="#5b4b15"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // ---- Controls ----
-  document.getElementById('restart').onclick = resetBall;
-  document.getElementById('prev').onclick = () => { level=Math.max(1,level-1); regenMaze(); };
-  document.getElementById('next').onclick = () => { level=Math.min(30,level+1); regenMaze(); };
-
-  // ---- Loop ----
-  let last=performance.now();
-  function tick(t){
-    const dt=Math.min(0.02,(t-last)/1000); last=t;
-
-    const kv = keyVec();
-    const ax = (tiltX*0.9 + kv.x*0.85) * 950;
-    const ay = (tiltY*0.9 + kv.y*0.85) * 950;
-    tiltTxt.textContent = `${(tiltX*10).toFixed(1)},${(tiltY*10).toFixed(1)}`;
-
-    ball.vx += ax*dt;
-    ball.vy += ay*dt;
-    ball.vx *= (1 - 3.2*dt);
-    ball.vy *= (1 - 3.2*dt);
-
-    ball.x += ball.vx*dt;
-    ball.y += ball.vy*dt;
-
-    const R = Math.min(cv.clientWidth, cv.clientHeight)*0.38;
-
-    applyCollisions(R);
-
-    if (checkWin()){
-      if (navigator.vibrate) navigator.vibrate(20);
-      level = Math.min(30, level+1);
-      regenMaze();
-    }
-
-    draw(R);
-    requestAnimationFrame(tick);
-  }
-
-  // Touch drag tilt assist
-  let dragging=false, sx=0, sy=0;
-  cv.addEventListener('pointerdown',(e)=>{dragging=true;sx=e.clientX;sy=e.clientY;});
-  cv.addEventListener('pointermove',(e)=>{
-    if(!dragging) return;
-    const dx=(e.clientX-sx)/150;
-    const dy=(e.clientY-sy)/150;
-    tiltX=Math.max(-1,Math.min(1,dx));
-    tiltY=Math.max(-1,Math.min(1,dy));
-  });
-  window.addEventListener('pointerup',()=>dragging=false);
-
-  regenMaze();
-  requestAnimationFrame(tick);
-})();
-</script>
-</body>
-</html>
+Probe:
+const runs = getProbeRuns(plan);
+For each run, spawn probe (diam=plan.probeDiameter) at startGate and simulate, record time & stuck.
+*/
