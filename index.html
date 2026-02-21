@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pixel Engine Center Pocket Compare (Triangle) - Rock n Roll: Ball Maze Challenge – Minku</title>
+<title>Rock n Roll: Ball Maze Challenge – Minku</title>
 <style>
 body{margin:0;background:#111;color:#fff;font-family:Arial}
 #top{padding:8px;background:#1a1a1a;display:flex;gap:10px;align-items:center}
@@ -12,6 +12,10 @@ canvas{display:block;width:100vw;height:90vh;touch-action:none}
 </style>
 </head>
 <body>
+<div id="errPanel" style="position:fixed;left:10px;right:10px;bottom:10px;max-height:42vh;overflow:auto;z-index:9999;
+background:rgba(0,0,0,.72);color:#fff;font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;padding:10px;border-radius:12px;
+border:1px solid rgba(255,255,255,.18);display:none;white-space:pre-wrap;"></div>
+
 
 <div id="top">
 <button id="restart">Restart</button>
@@ -22,6 +26,13 @@ canvas{display:block;width:100vw;height:90vh;touch-action:none}
 <canvas id="cv"></canvas>
 
 <script>
+(function(){
+  const p=()=>document.getElementById('errPanel');
+  function show(msg){ const e=p(); if(!e) return; e.style.display='block'; e.textContent += msg + "\n"; }
+  window.addEventListener('error', (ev)=> show("[error] " + (ev.message||"") + " @ " + (ev.filename||"") + ":" + (ev.lineno||"")));
+  window.addEventListener('unhandledrejection', (ev)=> show("[promise] " + (ev.reason && (ev.reason.stack||ev.reason.message) || String(ev.reason))));
+})();
+
 const cv = document.getElementById("cv");
 const ctx = cv.getContext("2d");
 
@@ -30,7 +41,7 @@ function resize(){
   cv.height = window.innerHeight*0.9;
 }
 resize();
-updatePocketCompare();
+setTimeout(()=>{ try{ if (typeof updatePocketCompare==='function') updatePocketCompare(); }catch(e){ const p=document.getElementById('errPanel'); if(p){p.style.display='block'; p.textContent += '[init] '+(e.stack||e.message||e)+'\n';}} }, 0);
 window.onresize = resize;
 
 let shape = "triangle";
@@ -142,10 +153,8 @@ function drawRings(R){
   }
 }
 
-
 // -------- Pixel Engine (Triangle) : Center Pocket Compare --------
-const PIX = { grid: 200, angles: 240, safety: 2 };
-
+var PIX = { grid: 200, angles: 240, safety: 2 };
 let pocket = null;
 
 function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
@@ -186,12 +195,12 @@ function computeInsideDistance(mask, grid){
   const qy = new Int16Array(grid*grid);
   let qs=0, qe=0;
 
-  function idx(x,y){ return y*grid+x; }
+  const idx=(x,y)=>y*grid+x;
 
   // boundary seeds
   for(let y=0;y<grid;y++){
     for(let x=0;x<grid;x++){
-      const i = idx(x,y);
+      const i=idx(x,y);
       if(!mask[i]) continue;
       let boundary=false;
       for(let oy=-1; oy<=1 && !boundary; oy++){
@@ -209,21 +218,21 @@ function computeInsideDistance(mask, grid){
     }
   }
 
-  const dirs = [
-    [1,0,1],[ -1,0,1],[0,1,1],[0,-1,1],
+  const dirs=[
+    [1,0,1],[-1,0,1],[0,1,1],[0,-1,1],
     [1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]
   ];
 
   while(qs<qe){
     const x=qx[qs], y=qy[qs]; qs++;
-    const base = dist[idx(x,y)];
+    const base=dist[idx(x,y)];
     for(const d of dirs){
       const xx=x+d[0], yy=y+d[1];
       if(xx<0||yy<0||xx>=grid||yy>=grid) continue;
-      const ii = idx(xx,yy);
+      const ii=idx(xx,yy);
       if(!mask[ii]) continue;
-      const nd = base + d[2];
-      if(nd < dist[ii]){
+      const nd=base+d[2];
+      if(nd<dist[ii]){
         dist[ii]=nd;
         qx[qe]=xx; qy[qe]=yy; qe++;
       }
@@ -231,28 +240,22 @@ function computeInsideDistance(mask, grid){
   }
 
   let Rmax=0;
-  for(let i=0;i<dist.length;i++){
-    if(mask[i] && dist[i]<inf && dist[i]>Rmax) Rmax=dist[i];
-  }
-  return {dist, Rmax};
+  for(let i=0;i<dist.length;i++) if(mask[i] && dist[i]<inf && dist[i]>Rmax) Rmax=dist[i];
+  return {dist,Rmax};
 }
 
 function rayMinToBoundary(mask, grid, angles){
-  const cxg = grid/2, cyg = grid/2;
-  let minD = 1e9;
+  const cxg=grid/2, cyg=grid/2;
+  let minD=1e9;
   for(let k=0;k<angles;k++){
-    const a = (k/angles)*Math.PI*2;
-    const dx = Math.cos(a), dy = Math.sin(a);
+    const a=(k/angles)*Math.PI*2;
+    const dx=Math.cos(a), dy=Math.sin(a);
     let t=0;
     for(let step=0; step<grid*3; step++){
-      const x = cxg + dx*t;
-      const y = cyg + dy*t;
-      const ix = x|0, iy = y|0;
+      const x=cxg+dx*t, y=cyg+dy*t;
+      const ix=x|0, iy=y|0;
       if(ix<0||iy<0||ix>=grid||iy>=grid) break;
-      if(mask[iy*grid+ix]===0){
-        minD = Math.min(minD, t);
-        break;
-      }
+      if(mask[iy*grid+ix]===0){ minD=Math.min(minD,t); break; }
       t += 0.6;
     }
   }
@@ -260,13 +263,12 @@ function rayMinToBoundary(mask, grid, angles){
 }
 
 function updatePocketCompare(){
-  const grid = PIX.grid;
-  const mask = buildTriangleMask(grid);
-  const {dist, Rmax} = computeInsideDistance(mask, grid);
+  const grid=PIX.grid;
+  const mask=buildTriangleMask(grid);
+  const {dist,Rmax}=computeInsideDistance(mask,grid);
 
-  // locked min pocket radius from ballD
   const ball = window.ball || {r:12};
-  const ballDpx = (ball.r||12)*2;
+  const ballDpx=(ball.r||12)*2;
   const rMinPx = 2.2 * ballDpx; // locked
 
   const R_canvas = Math.min(cv.width, cv.height)*0.42;
@@ -275,22 +277,16 @@ function updatePocketCompare(){
 
   const minRay = rayMinToBoundary(mask, grid, PIX.angles);
   const rCircleMax = Math.max(0, minRay - (PIX.safety+0.5));
-  const rCircle = Math.max(rMin, rCircleMax);
-
   const areaCircle = Math.PI * rCircleMax * rCircleMax;
 
-  // SDF pocket at threshold rMin gives maximum area while meeting min-clearance
   let count=0;
-  for(let i=0;i<dist.length;i++){
-    if(mask[i] && dist[i] >= rMin) count++;
-  }
+  for(let i=0;i<dist.length;i++) if(mask[i] && dist[i] >= rMin) count++;
   const areaSDF = count;
 
   const chosen = (areaCircle >= areaSDF) ? "circle" : "sdf";
+  pocket = {grid,mask,dist,Rmax,rMin,rCircleMax,areaCircle,areaSDF,chosen,gridToCanvas};
 
-  pocket = {grid, mask, dist, Rmax, rMin, rCircleMax, rCircle, areaCircle, areaSDF, chosen, gridToCanvas};
-
-  const dbg = document.getElementById('debug');
+  const dbg=document.getElementById('debug');
   if(dbg){
     dbg.textContent =
 `Center pocket compare (pixel engine)
@@ -306,22 +302,20 @@ Chosen: ${chosen.toUpperCase()}`;
 
 function drawPocketOverlay(){
   if(!pocket) return;
-  const {grid, mask, dist, rMin, rCircleMax, chosen, gridToCanvas} = pocket;
-  const cx = cv.width/2, cy = cv.height/2;
-  const scale = gridToCanvas;
-  const ox = cx - (grid/2)*scale;
-  const oy = cy - (grid/2)*scale;
+  const {grid,mask,dist,rMin,rCircleMax,chosen,gridToCanvas}=pocket;
+  const cx=cv.width/2, cy=cv.height/2;
+  const scale=gridToCanvas;
+  const ox=cx-(grid/2)*scale, oy=cy-(grid/2)*scale;
 
-  // Fill chosen
   ctx.save();
-  ctx.globalAlpha = 0.18;
+  ctx.globalAlpha=0.18;
   if(chosen==="circle"){
-    ctx.fillStyle = "#00ffd0";
+    ctx.fillStyle="#00ffd0";
     ctx.beginPath();
-    ctx.arc(cx, cy, rCircleMax*scale, 0, Math.PI*2);
+    ctx.arc(cx,cy,rCircleMax*scale,0,Math.PI*2);
     ctx.fill();
   }else{
-    ctx.fillStyle = "#ff4dd8";
+    ctx.fillStyle="#ff4dd8";
     for(let y=0;y<grid;y++){
       for(let x=0;x<grid;x++){
         const i=y*grid+x;
@@ -333,17 +327,12 @@ function drawPocketOverlay(){
   }
   ctx.restore();
 
-  // Outline both candidates
   ctx.save();
-  ctx.globalAlpha = 0.75;
-  ctx.strokeStyle = "#00ffd0";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, rCircleMax*scale, 0, Math.PI*2);
-  ctx.stroke();
+  ctx.globalAlpha=0.75;
+  ctx.strokeStyle="#00ffd0"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(cx,cy,rCircleMax*scale,0,Math.PI*2); ctx.stroke();
 
-  ctx.strokeStyle = "#ff4dd8";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle="#ff4dd8"; ctx.lineWidth=1;
   for(let y=1;y<grid-1;y++){
     for(let x=1;x<grid-1;x++){
       const i=y*grid+x;
