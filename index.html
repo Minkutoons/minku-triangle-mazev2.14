@@ -38,6 +38,10 @@
     }
     #panelHeader{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; gap:10px; }
     #panelBody{ max-height:38vh; overflow:auto; padding:10px 12px 12px; border-top:1px solid rgba(255,255,255,0.12); }
+
+    #panel.collapsed #panelBody{ display:none; }
+    #panel.collapsed #panelHeader{ border-bottom:none; }
+
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .col{ flex:1 1 220px; }
     label{ font-size:12px; opacity:0.9; display:flex; justify-content:space-between; gap:8px; width:100%; }
@@ -73,6 +77,7 @@
     <button id="btnBuild" class="btn">Build</button>
     <button id="btnReset" class="btn secondary">Reset</button>
     <button id="btnSim" class="btn secondary">Sim: Off</button>
+    <button id="btnPanel" class="btn secondary">Panel: On</button>
 
     <div class="pill" id="lockLine" style="opacity:0.95;">Lock v1</div>
   </div>
@@ -192,6 +197,7 @@
     btnBuild: document.getElementById('btnBuild'),
     btnReset: document.getElementById('btnReset'),
     btnSim: document.getElementById('btnSim'),
+    btnPanel: document.getElementById('btnPanel'),
     statusLine: document.getElementById('statusLine'),
     lockLine: document.getElementById('lockLine'),
 
@@ -222,6 +228,8 @@
     vChamfer: document.getElementById('vChamfer'),
     vRect: document.getElementById('vRect'),
   };
+
+  const panel = document.getElementById('panel');
 
   const state = {
     boundaryPoly: null,
@@ -282,6 +290,10 @@
       .forEach(id => el[id].addEventListener(evt, ()=>{ sync(); autoBuild(); }));
   });
   sync();
+
+  // Mobile-friendly: start with panel collapsed
+  if (window.innerWidth < 520) panel.classList.add('collapsed');
+  el.btnPanel.textContent = panel.classList.contains('collapsed') ? 'Panel: Off' : 'Panel: On';
 
   // ---------- Geometry helpers ----------
   const densify=(pts,steps=18)=>{
@@ -526,6 +538,13 @@
 
     const shadeFor = (k)=> (k%2===0)?220:170;
 
+    // Color palette: different for Dense vs Erosion (so you can visually compare versions)
+    const baseRGB = (logic==='dense') ? {r:60,g:190,b:230} : {r:230,g:85,b:85};
+    const colorFor = (k)=>{
+      const s = (k%2===0) ? 1.0 : 0.78;
+      return { r: Math.round(baseRGB.r*s), g: Math.round(baseRGB.g*s), b: Math.round(baseRGB.b*s) };
+    };
+
     if (logic === 'erosion'){
       let curr=m;
       for(let k=0;k<maxRings;k++){
@@ -551,8 +570,8 @@
             // cutout by skipping pixels in sector
             if(inCutoutSector(x,y, centerG.gx, centerG.gy, cutAngRad, angHalf)) continue;
             const p=i*4;
-            const shade=shadeFor(k);
-            data[p]=shade; data[p+1]=60; data[p+2]=60; data[p+3]=255;
+            const c=colorFor(k);
+            data[p]=c.r; data[p+1]=c.g; data[p+2]=c.b; data[p+3]=255;
           }
         }
 
@@ -583,8 +602,8 @@
             if(Math.abs(d[i]-t) <= halfWall){
               if(inCutoutSector(x,y, centerG.gx, centerG.gy, cutAngRad, angHalf)) continue;
               const p=i*4;
-              const shade=shadeFor(k);
-              data[p]=shade; data[p+1]=60; data[p+2]=60; data[p+3]=255;
+              const c=colorFor(k);
+              data[p]=c.r; data[p+1]=c.g; data[p+2]=c.b; data[p+3]=255;
             }
           }
         }
@@ -721,6 +740,11 @@
   }
 
   el.btnBuild.onclick = build;
+  el.btnPanel.onclick = ()=>{
+    panel.classList.toggle('collapsed');
+    el.btnPanel.textContent = panel.classList.contains('collapsed') ? 'Panel: Off' : 'Panel: On';
+  };
+
   el.btnReset.onclick = ()=>{
     state.ringsImage=null;
     state.simOn=false;
