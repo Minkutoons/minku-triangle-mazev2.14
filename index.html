@@ -1,615 +1,249 @@
-<!-- index.html  (single file test build)
-Triangle Lab (Safe) |  Shapes: Triangle→Square→Rectangle→Circle (Circle unlock @ L5)
--->
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Rock n Roll: Triangle Lab – Cutout + 4 Balls (Safe)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rock n Roll: Ball Maze Challenge – Minku</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --text:#e9eef7; --muted:#aab3c5; --accent:#78a6ff; --accent2:#ff7aa2; --accent3:#ffd166; }
-  html,body{margin:0;height:100%;background:linear-gradient(180deg,#0d0f14 0%, #0f1115 40%, #0b0d12 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-  #wrap{position:fixed;inset:0;display:flex;flex-direction:column}
-  #top{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;background:linear-gradient(#1a1a1a,#111);border-bottom:1px solid #2a2a2a}
-  .left,.right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .pill{background:rgba(23,26,33,0.92);border:1px solid #2b2b2b;border-radius:999px;padding:6px 10px;font-size:12px;color:var(--muted)}
-  .btn{background:rgba(23,26,33,0.92);border:1px solid #2b2b2b;border-radius:10px;padding:8px 10px;color:var(--text);font-weight:600}
-  .btn:active{transform:translateY(1px)}
-  .btn.primary{border-color:#3a3418;background:#2a2412;color:#ffeaa0}
-  .slider{display:flex;gap:8px;align-items:center}
-  input[type=range]{width:120px}
-  #cv{flex:1;display:block;touch-action:none}
-  #hint{position:fixed;left:12px;bottom:10px;color:#bdbdbd;font-size:12px;opacity:.9}
+body{margin:0;background:#111;color:#fff;font-family:Arial}
+#top{padding:8px;background:#1a1a1a;display:flex;gap:10px;align-items:center}
+button{padding:6px 10px;border-radius:6px;border:none;background:#333;color:#fff}
+canvas{display:block;width:100vw;height:90vh;touch-action:none}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="top">
-    <div class="left">
-      <div class="pill"><b style="color:#fff">Rock n Roll</b> • Minku</div>
-      <div class="pill" id="status">L1 • TRIANGLE • Circle 🔒</div>
-      <button class="btn" id="restart">Restart</button>
-      <button class="btn" id="prev">Prev</button>
-      <button class="btn primary" id="next">Next</button>
-    </div>
-    <div class="right">
-      <div class="slider pill">
-        Ball D
-        <input id="ballD" type="range" min="16" max="34" value="20" />
-        <span id="ballDVal" style="opacity:.85">20</span>
-      </div>
-      <div class="slider pill">
-        Gate W (×D)
-        <input id="gateW" type="range" min="2.10" max="2.45" step="0.01" value="2.30" />
-        <span id="gateWVal" style="opacity:.85">2.30</span>
-      </div>
-      <div class="slider pill">
-        Chamfer
-        <input id="chamfer" type="range" min="0" max="30" value="14" />
-      </div>
-      <div class="pill">Tilt: <span id="tiltTxt">0,0</span></div>
-    </div>
-  </div>
-  <canvas id="cv"></canvas>
+
+<div id="top">
+<button id="restart">Restart</button>
+<button id="comfort">Comfort: ON</button>
+<span id="info">Triangle (real edges)</span>
 </div>
-<div id="hint">Tilt phone or use Arrow keys / WASD. Goal: reach center pocket. (Spec: 4 balls)</div>
+
+<canvas id="cv"></canvas>
 
 <script>
-(() => {
-  function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};}
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
 
-  const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d');
-  const statusEl = document.getElementById('status');
-  const tiltTxt = document.getElementById('tiltTxt');
-  const chamferEl = document.getElementById('chamfer');
-  const ballDEl = document.getElementById('ballD');
-  const ballDVal = document.getElementById('ballDVal');
-  const gateWEl = document.getElementById('gateW');
-  const gateWVal = document.getElementById('gateWVal');
+function resize(){
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight*0.9;
+}
+resize();
+window.onresize = resize;
 
+let shape = "triangle";
+let comfortMode = true;
 
-  // ---------- Resize ----------
-  function resize(){
-    const dpr = Math.max(1, Math.min(2, devicePixelRatio||1));
-    cv.width = Math.floor(cv.clientWidth * dpr);
-    cv.height = Math.floor(cv.clientHeight * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-  }
-  new ResizeObserver(resize).observe(cv);
-  resize();
-  // ---------- Sliders ----------
-  function syncSliders(){
-    const D = +ballDEl.value;
-    ballDVal.textContent = String(D);
-    ball.baseR = D/2;
-    ball.r = ball.baseR;
-    gateWVal.textContent = (+gateWEl.value).toFixed(2);
-  }
-  ballDEl.addEventListener('input', ()=>{ syncSliders(); regenMaze(); });
-  gateWEl.addEventListener('input', ()=>{ syncSliders(); regenMaze(); });
+let ball = {x:0,y:0,vx:0,vy:0,r:12};
 
+function resetBall(){
+  ball.x = cv.width/2;
+  ball.y = cv.height/2 - 200;
+  ball.vx = ball.vy = 0;
+}
+resetBall();
 
-  // ---------- Level plan (keep simple, dopamine-friendly) ----------
-  // L1 Triangle, L2 Square, L3 Rectangle, L4 Mixed easy, L5 unlock Circle (classic)
-  // After L5, cycle shapes but keep circle frequent.
-  const SHAPES = ["triangle","square","rect","circle"];
-  function shapeForLevel(L){
-    if (L===1) return "triangle";
-    if (L===2) return "square";
-    if (L===3) return "rect";
-    if (L===4) return ["triangle","square","rect"][ (L-1)%3 ];
-    if (L>=5) return (L%3===2) ? "circle" : (L%3===0 ? "square" : "rect"); // circle often
-    return "square";
+document.getElementById("restart").onclick = resetBall;
+
+document.getElementById("comfort").onclick = ()=>{
+  comfortMode = !comfortMode;
+  document.getElementById("comfort").textContent =
+    "Comfort: " + (comfortMode?"ON":"OFF");
+};
+
+let tiltX=0, tiltY=0;
+window.addEventListener("deviceorientation",(e)=>{
+  let gx=e.gamma||0;
+  let by=e.beta||0;
+
+  if(comfortMode){
+    tiltX = by/30;
+    tiltY = -gx/30;
+  }else{
+    tiltX = gx/30;
+    tiltY = by/30;
   }
-  function ringCountForLevel(L){
-    // gentle rise
-    if (L<=2) return 6;
-    if (L<=5) return 7;
-    if (L<=10) return 8;
-    if (L<=15) return 9;
-    return 10;
-  }
-  function cutoutWidthForLevel(L){
-    // degrees: easy → smaller slowly (but not punishing)
-    if (L<=2) return 70;
-    if (L<=5) return 60;
-    if (L<=10) return 52;
-    if (L<=15) return 46;
-    return 42;
-  }
-  function wallThicknessForLevel(L){
-    return (L<=5) ? 10 : (L<=12 ? 11 : 12);
+});
+
+function drawShape(R){
+  let cx=cv.width/2;
+  let cy=cv.height/2;
+
+  ctx.strokeStyle="#555";
+  ctx.lineWidth=5;
+  ctx.beginPath();
+
+  if(shape==="circle"){
+    ctx.arc(cx,cy,R,0,Math.PI*2);
   }
 
-  // ---------- Input tilt ----------
-  let tiltX = 0, tiltY = 0;
-  let keyX = 0, keyY = 0;
-
-  // Device tilt
-  window.addEventListener('deviceorientation', (e) => {
-    // gamma: left-right, beta: front-back
-    const gx = (e.gamma ?? 0);
-    const by = (e.beta ?? 0);
-    tiltX = Math.max(-20, Math.min(20, gx)) / 20;
-    tiltY = Math.max(-20, Math.min(20, by)) / 20;
-  }, {passive:true});
-
-  // Keyboard
-  const keys = new Set();
-  window.addEventListener('keydown', (e)=>{ keys.add(e.key.toLowerCase()); });
-  window.addEventListener('keyup',   (e)=>{ keys.delete(e.key.toLowerCase()); });
-  function updateKeys(){
-    keyX = 0; keyY = 0;
-    if (keys.has('arrowleft') || keys.has('a')) keyX -= 1;
-    if (keys.has('arrowright')|| keys.has('d')) keyX += 1;
-    if (keys.has('arrowup')   || keys.has('w')) keyY -= 1;
-    if (keys.has('arrowdown') || keys.has('s')) keyY += 1;
-    const m = Math.hypot(keyX,keyY) || 1;
-    keyX/=m; keyY/=m;
+  if(shape==="square"){
+    ctx.rect(cx-R,cy-R,R*2,R*2);
   }
 
-  // ---------- Geometry: SDF for shapes ----------
-  // All shapes centered at (0,0). boundary size controlled by "R" (roughly half-min dimension).
-  function sdfCircle(x,y,R){ return Math.hypot(x,y) - R; }
-
-  // axis-aligned box (square/rect) with half-extents (hx,hy)
-  function sdfBox(x,y,hx,hy){
-    const ax = Math.abs(x) - hx;
-    const ay = Math.abs(y) - hy;
-    const ox = Math.max(ax,0), oy = Math.max(ay,0);
-    const outside = Math.hypot(ox,oy);
-    const inside = Math.min(Math.max(ax,ay),0);
-    return outside + inside;
+  if(shape==="rect"){
+    ctx.rect(cx-R*1.2,cy-R*0.7,R*2.4,R*1.4);
   }
 
-  // Equilateral triangle SDF (Inigo Quilez style, adapted)
-  function sdfEquiTri(x,y,R){
-    // R ~ circumradius-ish, tuned
-    // Canvas Y+ is down; flip Y so triangle is upright (point UP)
-    y = -y;
-    const k = Math.sqrt(3);
-    x = Math.abs(x) - R;
-    y = y + R/k;
-    if (x + k*y > 0){
-      const nx = (x - k*y)/2;
-      const ny = (-k*x - y)/2;
-      x = nx; y = ny;
-    }
-    x -= Math.max(Math.min(x,0), -2*R);
-    return -Math.hypot(x,y) * Math.sign(y);
-  }
-
-  function sdfShape(shape, x,y, R){
-    if (shape==="circle") return sdfCircle(x,y,R);
-    if (shape==="square") return sdfBox(x,y,R,R);
-    if (shape==="rect")   return sdfBox(x,y,R*1.15,R*0.85);
-    if (shape==="triangle") return sdfEquiTri(x,y,R*0.95);
-    return sdfCircle(x,y,R);
-  }
-
-  function gradSdf(shape, x,y,R){
-    // numeric gradient (cheap, stable)
-    const e = 0.8;
-    const dx = sdfShape(shape,x+e,y,R) - sdfShape(shape,x-e,y,R);
-    const dy = sdfShape(shape,x,y+e,R) - sdfShape(shape,x,y-e,R);
-    const m = Math.hypot(dx,dy) || 1;
-    return {gx: dx/m, gy: dy/m};
-  }
-
-  // ---------- Maze definition ----------
-  let level = 1;
-  const MAX_LEVEL = 1; // Triangle Lab: lock to Level 1
-  let shape = shapeForLevel(level);
-  let rings = ringCountForLevel(level);
-  let cutW = cutoutWidthForLevel(level) * Math.PI/180;
-  let wallT = wallThicknessForLevel(level);
-  let ringSpacing = 18; // computed each frame from boundary
-
-  // cutout per ring: center angle + width
-  let cutouts = []; // [{a,w}]
-  function regenMaze(){
-    shape = shapeForLevel(level);
-    rings = ringCountForLevel(level);
-    cutW  = cutoutWidthForLevel(level) * Math.PI/180;
-    wallT = wallThicknessForLevel(level);
-
-    // Cutout strategy (spec)
-    // Rings 1..N-1: two gates A & B; ring N: one gate C (single center entry).
-    // Balance across quarters (circle/polygon) or 6 sectors (triangle).
-    // Gate width is linear = (GateW × BallD) so 2 balls fit, 3 don't.
-    cutouts = []; // per ring: [{a,wLin,type}]
-    const seed = 10007*level + (shape.charCodeAt(0)*997) + rings*123;
-    const rng = mulberry32(seed);
-    const sectorCount = (shape === 'triangle') ? 6 : 4;
-    const sectorSize = (Math.PI*2)/sectorCount;
-
-    const totalAB = 2*(rings-1);
-    const base = Math.floor(totalAB/sectorCount);
-    let rem = totalAB % sectorCount;
-    const quota = Array(sectorCount).fill(base);
-    for(let i=0;i<sectorCount && rem>0;i++,rem--) quota[(i + (level%sectorCount))%sectorCount]++;
-
-    function pickSector(avoid){
-      // pick a sector with remaining quota, prefer not in avoid set
-      for(let k=0;k<sectorCount;k++){
-        const idx = (k + level) % sectorCount;
-        if (quota[idx] > 0 && !(avoid && avoid.has(idx))){ quota[idx]--; return idx; }
-      }
-      // fallback
-      for(let k=0;k<sectorCount;k++){
-        const idx = (k + level) % sectorCount;
-        if (quota[idx] > 0){ quota[idx]--; return idx; }
-      }
-      return 0;
-    }
-    function slotInSector(countInThisRing){
-      // early/late within sector to avoid stacking
-      return (countInThisRing % 2 === 0) ? 0.28 : 0.72;
-    }
-
-    const D = +ballDEl.value;
-    const Wmul = +gateWEl.value;
-    const wLin = Wmul * D;
-
-    for(let i=1;i<=rings;i++){
-      const gates = [];
-      if (i < rings){
-        const avoid = new Set();
-        const sA = pickSector(avoid); 
-        avoid.add(sA);
-        avoid.add((sA+1)%sectorCount);
-        avoid.add((sA-1+sectorCount)%sectorCount);
-        const sB = pickSector(avoid);
-
-        // jitter is relative to sector size (keeps balance)
-        const jitter = 0.10 * sectorSize;
-        function wrap(a){ const tau=Math.PI*2; a%=tau; return a<0?a+tau:a; }
-
-        const aA = wrap((sA + slotInSector(0))*sectorSize + (rng()*2-1)*jitter);
-        const aB = wrap((sB + slotInSector(1))*sectorSize + (rng()*2-1)*jitter);
-
-        gates.push({type:"A", a:aA, wLin});
-        gates.push({type:"B", a:aB, wLin});
-      } else {
-        // C: midpoint between last ring A/B (single gate)
-        const prev = cutouts[i-2];
-        const aA = prev[0].a, aB = prev[1].a;
-        let mid = Math.atan2(Math.sin(aA)+Math.sin(aB), Math.cos(aA)+Math.cos(aB));
-        mid += (rng()*2-1)*0.15;
-        mid = (mid%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
-        gates.push({type:"C", a:mid, wLin});
-      }
-      cutouts.push(gates);
-    }
-    resetBall();
-    updateStatus();
-  }
-
-  function updateStatus(){
-    const s = shape.toUpperCase();
-    const circleLocked = (level<5) ? "Circle 🔒" : "Circle ✅";
-    statusEl.textContent = `L${level} • ${s} • ${circleLocked}`;
-  }
-
-  // ---------- Ball ----------
-  const BALL_COUNT = 4;
-  const balls = Array.from({length: BALL_COUNT}, () => ({ x:0, y:0, vx:0, vy:0, r:10, baseR:10 }));
-  function resetBalls(){
-    const D = +ballDEl.value;
-    const r = D/2;
-    for(const b of balls){
-      b.vx = b.vy = 0;
-      b.baseR = r;
-      b.r = r;
-    }
-    // spawn near outer area but safely inside (triangle lab)
-    const R = Math.min(cv.clientWidth, cv.clientHeight)*0.38;
-    ringSpacing = (R - 40) / (rings + 1);
-    const rr = Math.max(60, R - ringSpacing*0.65);
-    for(let i=0;i<balls.length;i++){
-      const a = -Math.PI/2 + i*(Math.PI*2/balls.length) + 0.18;
-      const x = Math.cos(a)*rr, y = Math.sin(a)*rr;
-      balls[i].x = x; balls[i].y = y;
-    }
-  }
-
-  // ---------- UI ----------
-  document.getElementById('restart').onclick = () => resetBalls();
-  document.getElementById('prev').onclick = () => { level = Math.max(1, Math.min(MAX_LEVEL, level-1)); regenMaze(); resetBalls(); };
-  document.getElementById('next').onclick = () => { level = Math.max(1, Math.min(MAX_LEVEL, level+1)); regenMaze(); resetBalls(); };
-
-  // ---------- Draw helpers ----------
-  function drawChamferedPoly(points, chamfer){
-    // points in order
-    const n = points.length;
-    if (n<3){ return; }
-    ctx.beginPath();
-    for(let i=0;i<n;i++){
-      const p0 = points[(i-1+n)%n], p1 = points[i], p2 = points[(i+1)%n];
-      const v1x = p0.x - p1.x, v1y = p0.y - p1.y;
-      const v2x = p2.x - p1.x, v2y = p2.y - p1.y;
-      const l1 = Math.hypot(v1x,v1y) || 1;
-      const l2 = Math.hypot(v2x,v2y) || 1;
-      const c = Math.min(chamfer, l1*0.35, l2*0.35);
-      const a1x = p1.x + (v1x/l1)*c, a1y = p1.y + (v1y/l1)*c;
-      const a2x = p1.x + (v2x/l2)*c, a2y = p1.y + (v2y/l2)*c;
-      if (i===0) ctx.moveTo(a1x,a1y);
-      else ctx.lineTo(a1x,a1y);
-      ctx.lineTo(a2x,a2y);
-    }
+  if(shape==="triangle"){
+    ctx.moveTo(cx,cy-R);
+    ctx.lineTo(cx+R*Math.cos(Math.PI/6),
+               cy+R*Math.sin(Math.PI/6));
+    ctx.lineTo(cx-R*Math.cos(Math.PI/6),
+               cy+R*Math.sin(Math.PI/6));
     ctx.closePath();
   }
 
-  function pathBoundary(shape, R, chamfer){
-    if (shape==="circle"){
-      ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-      return;
-    }
-    if (shape==="square"){
-      const pts=[{x:-R,y:-R},{x:R,y:-R},{x:R,y:R},{x:-R,y:R}];
-      drawChamferedPoly(pts, chamfer); return;
-    }
-    if (shape==="rect"){
-      const hx=R*1.15, hy=R*0.85;
-      const pts=[{x:-hx,y:-hy},{x:hx,y:-hy},{x:hx,y:hy},{x:-hx,y:hy}];
-      drawChamferedPoly(pts, chamfer); return;
-    }
-    if (shape==="triangle"){
-      const r=R*0.95;
-      const pts=[
-        {x:0,y:-r},
-        {x: r*Math.cos(Math.PI/6), y: r*Math.sin(Math.PI/6)},
-        {x:-r*Math.cos(Math.PI/6), y: r*Math.sin(Math.PI/6)},
-      ];
-      drawChamferedPoly(pts, chamfer); return;
-    }
-    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  }
+  ctx.stroke();
+}
 
-  // ---------- Physics: keep ball inside boundary + ring walls w/ cutouts ----------
-  function applyCollisionsOne(b, shape, R){
-    // 1) Hard boundary clamp (100% no outside)
-    let d = sdfShape(shape, b.x, b.y, R);
-    if (d > -b.r){
-      // push inward along gradient
-      const {gx,gy} = gradSdf(shape, b.x, b.y, R);
-      const push = (d + b.r) + 0.5;
-      b.x -= gx * push;
-      b.y -= gy * push;
-      // damp
-      b.vx *= 0.4; b.vy *= 0.4;
+function drawRings(R){
+  let cx=cv.width/2;
+  let cy=cv.height/2;
+  let spacing = R/6;
+
+  ctx.strokeStyle="#777";
+  ctx.lineWidth=4;
+
+  for(let i=1;i<=4;i++){
+    ctx.beginPath();
+
+    if(shape==="circle"){
+      ctx.arc(cx,cy,R-i*spacing,0,Math.PI*2);
     }
 
-    // 2) Ring walls (bands of SDF offsets) with angular cutouts
-    // spacing computed from R and ring count (uniform distance-field spacing)
-    ringSpacing = (R - 40) / (rings + 1);
-    const w = wallT;
-    for(let i=1;i<=rings;i++){
-      const target = -i * ringSpacing; // contour where sdf == target
-      d = sdfShape(shape, ball.x, ball.y, R);
-      const band = Math.abs(d - target);
-      if (band < (w/2 + ball.r*0.55)){
-        // check cutout at this ring by angle
-        const ang = Math.atan2(ball.y, ball.x);
-        const gates = cutouts[i-1];
-        // Convert linear gate width to angular width using approximate ring radius (works well for circle and OK for SDF shapes)
-        const approxR = Math.max(40, (R - i*ringSpacing));
-        let inCut = false;
-        for(const g of gates){
-          const wAng = g.wLin / approxR;
-          let da = Math.atan2(Math.sin(ang - g.a), Math.cos(ang - g.a));
-          if (Math.abs(da) < (wAng/2)) { inCut = true; break; }
-        }
-        if (!inCut){
-          // push out of wall band along sdf gradient
-          const {gx,gy} = gradSdf(shape, ball.x, ball.y, R);
-          // move to nearest side of band
-          const sign = (d > target) ? 1 : -1;
-          const push = (w/2 + ball.r*0.6) - band + 0.6;
-          ball.x += gx * push * sign;
-          ball.y += gy * push * sign;
-          ball.vx *= 0.55; ball.vy *= 0.55;
-        }
-      }
+    if(shape==="square"){
+      ctx.rect(cx-(R-i*spacing),
+               cy-(R-i*spacing),
+               (R-i*spacing)*2,
+               (R-i*spacing)*2);
     }
-  }
 
-  
-  function resolveBallBall(){
-    // simple stable positional separation + damping (no bounce)
-    for(let i=0;i<balls.length;i++){
-      for(let j=i+1;j<balls.length;j++){
-        const a = balls[i], c = balls[j];
-        const dx = c.x - a.x, dy = c.y - a.y;
-        const dist = Math.hypot(dx,dy) || 1e-6;
-        const minD = a.r + c.r + 0.6;
-        if(dist < minD){
-          const nx = dx/dist, ny = dy/dist;
-          const push = (minD - dist)*0.5;
-          a.x -= nx*push; a.y -= ny*push;
-          c.x += nx*push; c.y += ny*push;
-          a.vx *= 0.92; a.vy *= 0.92;
-          c.vx *= 0.92; c.vy *= 0.92;
-        }
-      }
+    if(shape==="rect"){
+      ctx.rect(cx-(R-i*spacing)*1.2,
+               cy-(R-i*spacing)*0.7,
+               (R-i*spacing)*2.4,
+               (R-i*spacing)*1.4);
     }
-  }
 
-  function applyCollisions(shape, R){
-    for(const b of balls) applyCollisionsOne(b, shape, R);
-    resolveBallBall();
-  }
-
-// Win: reach center zone
-  function checkWin(){
-    const centerR = balls[0].baseR * 4.4;
-    for(const b of balls){
-      const rr = Math.hypot(b.x, b.y);
-      if (rr < centerR) return true;
-    }
-    return false;
-  }
-
-  // ---------- Render ----------
-  function draw(shape, R){
-    ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
-    ctx.save();
-    ctx.translate(cv.clientWidth/2, cv.clientHeight/2);
-
-    // background vignette
-    const g = ctx.createRadialGradient(0,0,20,0,0,R*1.35);
-    g.addColorStop(0,"#1a1a1a"); g.addColorStop(1,"#0f0f0f");
-    ctx.fillStyle = g; ctx.fillRect(-cv.clientWidth/2,-cv.clientHeight/2,cv.clientWidth,cv.clientHeight);
-
-    const chamfer = +chamferEl.value;
-
-    // outer base
-    ctx.fillStyle = "#1c1c1c";
-    pathBoundary(shape, R+18, chamfer);
-    ctx.fill();
-
-    // boundary stroke
-    ctx.strokeStyle = "#3a3a3a";
-    ctx.lineWidth = 2;
-    pathBoundary(shape, R, chamfer);
-    ctx.stroke();
-
-    // rings (draw using contour sampling for visuals)
-    ringSpacing = (R - 40) / (rings + 1);
-    for(let i=1;i<=rings;i++){
-      const target = -i * ringSpacing;
-      // draw ring band by marching angle points
-      const steps = 220;
-      ctx.beginPath();
-      for(let s=0;s<=steps;s++){
-        const ang = (s/steps)*Math.PI*2;
-        // find point on contour along ray by binary search t
-        let lo=0, hi=R*1.4;
-        for(let it=0;it<18;it++){
-          const mid = (lo+hi)/2;
-          const x = Math.cos(ang)*mid;
-          const y = Math.sin(ang)*mid;
-          const d = sdfShape(shape,x,y,R);
-          if (d > target) hi = mid; else lo = mid;
-        }
-        const r = (lo+hi)/2;
-        const x = Math.cos(ang)*r, y = Math.sin(ang)*r;
-        if (s===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
+    if(shape==="triangle"){
+      let r2=R-i*spacing;
+      ctx.moveTo(cx,cy-r2);
+      ctx.lineTo(cx+r2*Math.cos(Math.PI/6),
+                 cy+r2*Math.sin(Math.PI/6));
+      ctx.lineTo(cx-r2*Math.cos(Math.PI/6),
+                 cy+r2*Math.sin(Math.PI/6));
       ctx.closePath();
-
-      // cutout mask: we "erase" by drawing over background on that arc region (cheap)
-      ctx.strokeStyle = "#2f2f2f";
-      ctx.lineWidth = wallT;
-      ctx.lineCap = "round";
-      ctx.stroke();
-
-      // "erase" cutout segment
-      const gates = cutouts[i-1];
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-out";
-      // erase each gate segment
-      const approxR = Math.max(40, (R - i*ringSpacing));
-      for(const gGate of gates){
-        const wAng = gGate.wLin / approxR;
-        ctx.beginPath();
-        const a0 = gGate.a - wAng/2, a1 = gGate.a + wAng/2;
-        const steps2 = 60;
-        for(let s=0;s<=steps2;s++){
-          const ang = a0 + (s/steps2)*(a1-a0);
-        let lo=0, hi=R*1.4;
-        for(let it=0;it<16;it++){
-          const mid=(lo+hi)/2;
-          const x=Math.cos(ang)*mid, y=Math.sin(ang)*mid;
-          const d=sdfShape(shape,x,y,R);
-          if (d > target) hi=mid; else lo=mid;
-        }
-        const r=(lo+hi)/2;
-        const x=Math.cos(ang)*r, y=Math.sin(ang)*r;
-        if (s===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = wallT + 6;
-        ctx.stroke();
-      }
-      ctx.restore();
     }
 
-    // center pocket (sized for 4 balls)
-    const centerR = ball.baseR * 4.4;
-    ctx.fillStyle = "rgba(255,255,255,0.03)";
-    ctx.beginPath(); ctx.arc(0,0,centerR,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0,0,centerR,0,Math.PI*2); ctx.stroke();
+    ctx.stroke();
+  }
+}
 
-    // ball
-    const bg = ctx.createRadialGradient(ball.x-4, ball.y-6, 2, ball.x, ball.y, ball.r+8);
-    bg.addColorStop(0,"rgba(255,255,255,0.95)");
-    bg.addColorStop(1,"#f6f2ea");
-    ctx.fillStyle = bg;
-    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.stroke();
 
-    ctx.restore();
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+function closestPointOnSegment(px,py, ax,ay, bx,by){
+  const abx = bx-ax, aby = by-ay;
+  const apx = px-ax, apy = py-ay;
+  const t = clamp((apx*abx + apy*aby) / (abx*abx + aby*aby + 1e-9), 0, 1);
+  return { x: ax + abx*t, y: ay + aby*t };
+}
+
+function pointInTri(px,py, ax,ay, bx,by, cx,cy){
+  // barycentric (stable)
+  const v0x = cx-ax, v0y = cy-ay;
+  const v1x = bx-ax, v1y = by-ay;
+  const v2x = px-ax, v2y = py-ay;
+
+  const dot00 = v0x*v0x + v0y*v0y;
+  const dot01 = v0x*v1x + v0y*v1y;
+  const dot02 = v0x*v2x + v0y*v2y;
+  const dot11 = v1x*v1x + v1y*v1y;
+  const dot12 = v1x*v2x + v1y*v2y;
+
+  const invDen = 1 / (dot00*dot11 - dot01*dot01 + 1e-9);
+  const u = (dot11*dot02 - dot01*dot12) * invDen;
+  const v = (dot00*dot12 - dot01*dot02) * invDen;
+  return (u >= 0) && (v >= 0) && (u + v <= 1);
+}
+
+function clampBallToTriangle(ball, ax,ay, bx,by, cx,cy){
+  const edges = [
+    [ax,ay,bx,by],
+    [bx,by,cx,cy],
+    [cx,cy,ax,ay]
+  ];
+
+  // if outside, snap to nearest perimeter point
+  if(!pointInTri(ball.x, ball.y, ax,ay, bx,by, cx,cy)){
+    let best = null, bestD2 = 1e30;
+    for(const e of edges){
+      const p = closestPointOnSegment(ball.x, ball.y, e[0],e[1], e[2],e[3]);
+      const dx = ball.x - p.x, dy = ball.y - p.y;
+      const d2 = dx*dx + dy*dy;
+      if(d2 < bestD2){ bestD2 = d2; best = p; }
+    }
+    ball.x = best.x;
+    ball.y = best.y;
   }
 
-  // ---------- Loop ----------
-  let last = performance.now();
-  function tick(t){
-    const dt = Math.min(0.02, (t-last)/1000); last = t;
-
-    updateKeys();
-    const ax = (tiltX*0.9 + keyX*0.85) * 950;
-    const ay = (tiltY*0.9 + keyY*0.85) * 950;
-
-    tiltTxt.textContent = `${(tiltX*10).toFixed(1)},${(tiltY*10).toFixed(1)}`;
-
-    // integrate (all balls)
-    for(const b of balls){
-      b.vx += ax*dt;
-      b.vy += ay*dt;
-      // friction
-      b.vx *= (1 - 3.2*dt);
-      b.vy *= (1 - 3.2*dt);
-      b.x += b.vx*dt;
-      b.y += b.vy*dt;
+  // ensure distance from each edge >= r (push away from edge)
+  for(const e of edges){
+    const p = closestPointOnSegment(ball.x, ball.y, e[0],e[1], e[2],e[3]);
+    const dx = ball.x - p.x, dy = ball.y - p.y;
+    const d = Math.hypot(dx,dy) + 1e-9;
+    if(d < ball.r){
+      const push = (ball.r - d);
+      ball.x += (dx/d)*push;
+      ball.y += (dy/d)*push;
+      ball.vx *= 0.92;
+      ball.vy *= 0.92;
     }
+  }
+}
 
-    // boundary based on screen
-    const R = Math.min(cv.clientWidth, cv.clientHeight)*0.38;
 
-    applyCollisions(shape, R);
+function loop(){
+  ctx.clearRect(0,0,cv.width,cv.height);
 
-    // Win -> (lab) just vibrate + reset
-    if (checkWin()){
-      if (navigator.vibrate) navigator.vibrate(25);
-      resetBalls();
-    }
+  let cx=cv.width/2;
+  let cy=cv.height/2;
+  let R=250;
 
-    draw(shape, R);
-    requestAnimationFrame(tick);
+  drawShape(R);
+  drawRings(R);
+
+  ball.vx += tiltX;
+  ball.vy += tiltY;
+  ball.vx *= 0.98;
+  ball.vy *= 0.98;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+  // Triangle boundary clamp (real physics for Level 1)
+  if(shape==="triangle"){
+    const ax = cx, ay = cy - R;
+    const bx = cx + R*Math.cos(Math.PI/6), by = cy + R*Math.sin(Math.PI/6);
+    const cx2 = cx - R*Math.cos(Math.PI/6), cy2 = cy + R*Math.sin(Math.PI/6);
+    clampBallToTriangle(ball, ax,ay, bx,by, cx2,cy2);
+  } else {
+    // fallback clamp for other shapes (kept simple)
+    if(ball.x < cx-R+ball.r) ball.x = cx-R+ball.r;
+    if(ball.x > cx+R-ball.r) ball.x = cx+R-ball.r;
+    if(ball.y < cy-R+ball.r) ball.y = cy-R+ball.r;
+    if(ball.y > cy+R-ball.r) ball.y = cy+R-ball.r;
   }
 
-  syncSliders();
-  regenMaze();
-  requestAnimationFrame(tick);
+  ctx.fillStyle="gold";
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
 
-  // Touch drag = manual tilt assist (for testing)
-  let dragging=false, sx=0, sy=0;
-  cv.addEventListener('pointerdown', (e)=>{ dragging=true; sx=e.clientX; sy=e.clientY; });
-  cv.addEventListener('pointermove', (e)=>{
-    if(!dragging) return;
-    const dx = (e.clientX - sx)/150;
-    const dy = (e.clientY - sy)/150;
-    tiltX = Math.max(-1,Math.min(1,dx));
-    tiltY = Math.max(-1,Math.min(1,dy));
-  });
-  window.addEventListener('pointerup', ()=> dragging=false);
+  requestAnimationFrame(loop);
+}
 
-})();
+loop();
 </script>
 </body>
 </html>
