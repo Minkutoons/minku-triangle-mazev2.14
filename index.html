@@ -169,7 +169,11 @@
     cv.height = Math.floor(cv.clientHeight * dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
   }
-  new ResizeObserver(resize).observe(cv);
+  if (window.ResizeObserver) {
+    new ResizeObserver(resize).observe(cv);
+  } else {
+    window.addEventListener('resize', resize, {passive:true});
+  }
   resize();
 
   // ---------- Input tilt ----------
@@ -257,6 +261,12 @@
   }
 
   // ---------- Maze build (cutouts gathered & applied) ----------
+  function wrapAng(a){
+    const tau = Math.PI*2;
+    a = a % tau;
+    return a < 0 ? a + tau : a;
+  }
+
   function buildLevel(){
     shape = shapeForLevel(level);
     rings = ringCountForLevel(level);
@@ -268,7 +278,9 @@
     const sectorCount = (shape === 'triangle') ? LOCKED.cutout.sectorsTri : LOCKED.cutout.sectorsOther;
     const sectorSize = (Math.PI*2)/sectorCount;
 
-    // balance quotas across sectors for A/B gates (rings-1, 2 gates each)
+    // Balance quotas across sectors for A/B gates (rings-1, 2 gates each).
+    // IMPORTANT: keep angles inside their picked sectors (no spiral drift),
+    // otherwise "quarter balance" breaks.
     const totalAB = 2*(rings-1);
     const base = Math.floor(totalAB/sectorCount);
     let rem = totalAB % sectorCount;
@@ -277,47 +289,69 @@
       quota[(i + (level%sectorCount))%sectorCount]++; // rotate by level
     }
 
-    function pickSector(){
-      for(let k=0;k<sectorCount;k++){
-        const idx = (k + level) % sectorCount;
-        if (quota[idx] > 0){ quota[idx]--; return idx; }
+    function pickSector(avoidSet){
+      // pick the sector with remaining quota, prefer far from avoids
+      let best = -1, bestScore = -1;
+      for(let s=0;s<sectorCount;s++){
+        if(quota[s] <= 0) continue;
+        if(avoidSet && avoidSet.has(s)) continue;
+        let score = quota[s];
+        if(avoidSet && avoidSet.size){
+          // distance around circle to nearest avoid
+          let minDist = 99;
+          for(const a of avoidSet){
+            let d = Math.abs(s-a);
+            d = Math.min(d, sectorCount-d);
+            minDist = Math.min(minDist, d);
+          }
+          score += minDist * 0.5;
+        }
+        if(score > bestScore){ bestScore = score; best = s; }
       }
-      return 0;
-    }
-    function slot(countInThisRing){
-      return (countInThisRing % 2 === 0) ? LOCKED.cutout.slotA : LOCKED.cutout.slotB;
+      if(best < 0){
+        // fallback: any sector
+        for(let s=0;s<sectorCount;s++){ if(quota[s]>0){ best=s; break; } }
+        if(best < 0) best = 0;
+      }
+      quota[best] = Math.max(0, quota[best]-1);
+      return best;
     }
 
     const D = +ballDEl.value;
     const Wmul = +gateWEl.value;
     const wLin = Wmul * D;
 
+    // jitter in radians (scaled by sector size)
+    const jitterRad = LOCKED.cutout.sectorJitter * sectorSize;
+
     cutouts = [];
     for(let i=1;i<=rings;i++){
       const gates = [];
       if (i < rings){
-        let sA = pickSector();
-        let aA = (sA + slot(0))*sectorSize + (rng()*2-1)*LOCKED.cutout.sectorJitter;
+        const avoid = new Set();
+        const sA = pickSector(avoid); avoid.add(sA);
+        // also try to avoid neighboring sector for B if possible
+        avoid.add((sA+1)%sectorCount);
+        avoid.add((sA-1+sectorCount)%sectorCount);
 
-        let sB = pickSector();
-        let aB = (sB + slot(1))*sectorSize + (rng()*2-1)*LOCKED.cutout.sectorJitter;
+        const sB = pickSector(avoid);
 
-        // spiral bias ring-to-ring (odd CW, even CCW)
-        const bias = (level%2===1) ? +1 : -1;
-        const shift = (LOCKED.cutout.spiralBase + (rng()*2-1)*LOCKED.cutout.spiralJitter) * i * bias;
-        aA += shift; aB += shift;
+        const aA = wrapAng((sA + LOCKED.cutout.slotA) * sectorSize + (rng()*2-1)*jitterRad);
+        const aB = wrapAng((sB + LOCKED.cutout.slotB) * sectorSize + (rng()*2-1)*jitterRad);
 
         gates.push({type:"A", a:aA, wLin});
         gates.push({type:"B", a:aB, wLin});
       } else {
+        // last ring: single gate C near the midpoint of previous A & B, with small jitter
         const prev = cutouts[i-2];
         const aA = prev[0].a, aB = prev[1].a;
         let mid = Math.atan2(Math.sin(aA)+Math.sin(aB), Math.cos(aA)+Math.cos(aB));
-        mid += (rng()*2-1)*LOCKED.cutout.cJitter;
-        gates.push({type:"C", a:mid, wLin});
+        mid += (rng()*2-1) * (LOCKED.cutout.cJitter * sectorSize);
+        gates.push({type:"C", a:wrapAng(mid), wLin});
       }
       cutouts.push(gates);
     }
+
     resetBalls();
     updateStatus();
   }
